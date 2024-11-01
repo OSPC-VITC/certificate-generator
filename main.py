@@ -6,8 +6,7 @@ import zipfile
 from datetime import datetime
 
 
-def create_certificate(template_img, name, output_path, cert_type, prize_rank=None, event_name=None, event_date=None, signers=None):
-
+def create_certificate(template_img, name, output_path, cert_type, prize_rank=None, event_name=None, event_date=None, signers=None, speaker_details=None):
     img = template_img.copy()
     if img.mode != 'RGBA':
         img = img.convert('RGBA')
@@ -18,15 +17,14 @@ def create_certificate(template_img, name, output_path, cert_type, prize_rank=No
     # Get image dimensions
     img_w, img_h = img.size
     
-    
     title_font = ImageFont.truetype("Latinia.ttf", 170)
     name_font = ImageFont.truetype("Latinia.ttf", 100)
     header_font = ImageFont.truetype("Latinia.ttf", 60)
     details_font = ImageFont.truetype("Latinia.ttf", 50)
     sign_font = ImageFont.truetype("Latinia.ttf", 35)
     prize_font = ImageFont.truetype("Latinia.ttf", 75)
+    speaker_font = ImageFont.truetype("Latinia.ttf", 45)
 
-    
     # Add certificate type with vertical positioning
     cert_title = f"Of {cert_type}"
     title_bbox = draw.textbbox((0, 0), cert_title, font=title_font)
@@ -87,6 +85,18 @@ def create_certificate(template_img, name, output_path, cert_type, prize_rank=No
         x = (img_w - date_w) / 2
         y += 70
         draw.text((x, y), date_text, fill=(0, 0, 0, 255), font=details_font)
+
+        # Add speaker details if provided
+        if speaker_details and speaker_details['name']:
+            speaker_text = f"Speaker: {speaker_details['name']}"
+            if speaker_details['designation']:
+                speaker_text += f" - {speaker_details['designation']}"
+            
+            speaker_bbox = draw.textbbox((0, 0), speaker_text, font=speaker_font)
+            speaker_w = speaker_bbox[2] - speaker_bbox[0]
+            x = (img_w - speaker_w) / 2
+            y += 70  # Add some space after the date
+            draw.text((x, y), speaker_text, fill=(0, 0, 0, 255), font=speaker_font)
     
     # signatures
     if signers:
@@ -167,29 +177,49 @@ def main():
     with col2:
         event_date = st.date_input("Event Date")
     
+    # Speaker details
+    st.header("Speaker Details")
+    include_speaker = st.checkbox("Include Speaker Details")
+    speaker_details = None
+    
+    if include_speaker:
+        speaker_col1, speaker_col2 = st.columns(2)
+        with speaker_col1:
+            speaker_name = st.text_input("Speaker Name")
+        with speaker_col2:
+            speaker_designation = st.text_input("Speaker Designation")
+        speaker_details = {
+            'name': speaker_name,
+            'designation': speaker_designation
+        }
+    
     # Signature details
     st.header("Signature Details")
-    num_signers = st.number_input("Number of Signatories", min_value=1, max_value=3, value=2)
+    num_signers = st.number_input("Number of Signatories", min_value=0, max_value=2, value=2)
     
     signers = []
-    cols = st.columns(num_signers)
-    
-    for i, col in enumerate(cols):
-        with col:
-            st.subheader(f"Signatory {i+1}")
-            name = st.text_input(f"Name", key=f"name_{i}")
-            post = st.text_input(f"Designation", key=f"post_{i}")
-            signature = st.file_uploader(
-                f"Signature Image (PNG with transparency)",
-                type=['png'],
-                help="Upload a PNG image with transparent background",
-                key=f"sig_{i}"
-            )
-            signers.append({
-                'name': name,
-                'post': post,
-                'signature': signature
-            })
+
+    if num_signers > 0:
+        cols = st.columns(num_signers)
+        
+        for i, col in enumerate(cols):
+            with col:
+                st.subheader(f"Signatory {i+1}")
+                name = st.text_input(f"Name", key=f"name_{i}")
+                post = st.text_input(f"Designation", key=f"post_{i}")
+                signature = st.file_uploader(
+                    f"Signature Image (PNG with transparency)",
+                    type=['png'],
+                    help="Upload a PNG image with transparent background",
+                    key=f"sig_{i}"
+                )
+                signers.append({
+                    'name': name,
+                    'post': post,
+                    'signature': signature
+                })
+    else:
+        st.write("No signatories selected.")
     
     # Names file upload
     st.header("Upload Names")
@@ -216,16 +246,10 @@ def main():
                 st.header("Prize Allocation")
                 st.write("Select names for each prize category:")
                 
-                # Create three columns for prize allocation
                 prize_cols = st.columns(3)
-                
-                # Dictionary to store current selections
                 current_selections = {}
-                
-                # List of all names
                 all_names = df[name_column].tolist()
                 
-                # Prize allocation interface
                 with prize_cols[0]:
                     first_prize = st.multiselect(
                         "First Prize Winners",
@@ -236,7 +260,6 @@ def main():
                         current_selections[name] = "First"
                 
                 with prize_cols[1]:
-                    # Filter out names already selected for first prize
                     available_second = [n for n in all_names if n not in first_prize]
                     second_prize = st.multiselect(
                         "Second Prize Winners",
@@ -247,7 +270,6 @@ def main():
                         current_selections[name] = "Second"
                 
                 with prize_cols[2]:
-                    # Filter out names already selected for first and second prize
                     available_third = [n for n in all_names if n not in first_prize and n not in second_prize]
                     third_prize = st.multiselect(
                         "Third Prize Winners",
@@ -257,10 +279,8 @@ def main():
                     for name in third_prize:
                         current_selections[name] = "Third"
                 
-                # Update session state with current selections
                 st.session_state.prize_assignments = current_selections
                 
-                # Show current prize assignments
                 st.subheader("Current Prize Assignments")
                 assignment_df = pd.DataFrame([
                     {"Name": name, "Prize": prize} 
@@ -274,7 +294,6 @@ def main():
                     st.error("Please upload all signature images before generating certificates.")
                     return
                 
-                # Create ZIP file in memory
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
                     progress_bar = st.progress(0)
@@ -286,11 +305,10 @@ def main():
                         if not name:
                             continue
                         
-                        # Determine prize rank for this person
                         prize_rank = None
                         if cert_type == "Excellence":
                             prize_rank = st.session_state.prize_assignments.get(name)
-                            if not prize_rank:  # Skip if no prize assigned
+                            if not prize_rank:
                                 continue
                             
                         status_text.text(f"Generating certificate for {name}...")
@@ -305,7 +323,8 @@ def main():
                                 prize_rank=prize_rank,
                                 event_name=event_name,
                                 event_date=event_date,
-                                signers=signers
+                                signers=signers,
+                                speaker_details=speaker_details
                             )
                             
                             filename = f"{name.replace(' ', '_')}_{cert_type.lower()}"
@@ -329,10 +348,7 @@ def main():
                     mime="application/zip"
                 )
                 
-                
-                
         except Exception as e:
             st.error(f"An error occurred while processing the names file: {str(e)}")
-
 
 main()
